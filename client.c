@@ -10,19 +10,20 @@
 
 void handle_write(int socket_desc, const char *local_file_path, const char *remote_file_path);
 void handle_get(int socket_desc, const char *remote_file_path, const char *local_file_path);
+void handle_rm(int socket_desc, const char *remote_file_path);
 
 int main(int argc, char *argv[])
 {
     int socket_desc;
     struct sockaddr_in server_addr;
 
-    if (argc != 4)
+    if (argc < 3 || argc > 4)
     {
-        printf("Usage: %s <COMMAND> <local-path> <remote-path>\n", argv[0]);
+        printf("Usage: %s <COMMAND> [local-path] <remote-path>\n", argv[0]);
         printf("COMMAND can be:\n");
-        printf("  WRITE: Upload a local file to the server\n");
-        printf("  GET: Download a file from the server\n");
-        printf(" RM: Delete a file from the server\n");
+        printf("  WRITE: Upload a local file to the server (requires both local and remote paths)\n");
+        printf("  GET: Download a file from the server (requires both remote and local paths)\n");
+        printf("  RM: Delete a file from the server (requires only remote path)\n");
         return 1;
     }
 
@@ -49,15 +50,37 @@ int main(int argc, char *argv[])
 
     if (strcmp(argv[1], "WRITE") == 0)
     {
+        if (argc != 4)
+        {
+            printf("WRITE requires a local path and a remote path.\n");
+            close(socket_desc);
+            return 1;
+        }
         handle_write(socket_desc, argv[2], argv[3]);
     }
     else if (strcmp(argv[1], "GET") == 0)
     {
+        if (argc != 4)
+        {
+            printf("GET requires a remote path and a local path.\n");
+            close(socket_desc);
+            return 1;
+        }
         handle_get(socket_desc, argv[2], argv[3]);
+    }
+    else if (strcmp(argv[1], "RM") == 0)
+    {
+        if (argc != 3)
+        {
+            printf("RM requires only a remote path.\n");
+            close(socket_desc);
+            return 1;
+        }
+        handle_rm(socket_desc, argv[2]);
     }
     else
     {
-        printf("Invalid command. Use WRITE or GET.\n");
+        printf("Invalid command. Use WRITE, GET, or RM.\n");
     }
 
     close(socket_desc);
@@ -222,4 +245,30 @@ void handle_get(int socket_desc, const char *remote_file_path, const char *local
 
     close(local_fd);
     printf("File retrieved successfully\n");
+}
+
+void handle_rm(int socket_desc, const char *remote_file_path)
+{
+    char command[BUFFER_SIZE], buffer[BUFFER_SIZE];
+    ssize_t bytes_read;
+
+    // Send the RM command
+    snprintf(command, sizeof(command), "RM %s", remote_file_path);
+    if (send(socket_desc, command, strlen(command), 0) < 0)
+    {
+        perror("Failed to send RM command");
+        return;
+    }
+
+    // Wait for server response
+    bytes_read = recv(socket_desc, buffer, sizeof(buffer) - 1, 0);
+    if (bytes_read > 0)
+    {
+        buffer[bytes_read] = '\0';
+        printf("Server response: %s\n", buffer);
+    }
+    else
+    {
+        perror("Failed to receive server response");
+    }
 }

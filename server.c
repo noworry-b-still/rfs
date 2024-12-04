@@ -210,6 +210,32 @@ void handle_client(int client_sock)
 
         close(file_fd);
     }
+    else if (strncmp(command, "RM", 2) == 0)
+    {
+        // Parse the RM command
+        if (sscanf(command, "RM %255s", remote_file) != 1)
+        {
+            const char *error_msg = "Invalid command format. Use: RM <remote-file-or-folder>\n";
+            send(client_sock, error_msg, strlen(error_msg), 0);
+            return;
+        }
+
+        snprintf(full_path, sizeof(full_path), "%s/%s", SERVER_ROOT, remote_file);
+        printf("Full path to delete: %s\n", full_path);
+
+        // Attempt to remove the file or directory
+        if (remove(full_path) == 0)
+        {
+            const char *success_msg = "SUCCESS: File or folder deleted\n";
+            send(client_sock, success_msg, strlen(success_msg), 0);
+        }
+        else
+        {
+            perror("Failed to delete file or folder");
+            const char *error_msg = "ERROR: Failed to delete file or folder\n";
+            send(client_sock, error_msg, strlen(error_msg), 0);
+        }
+    }
     else
     {
         const char *error_msg = "ERROR: Unsupported command\n";
