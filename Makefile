@@ -19,6 +19,7 @@ $(CLIENT): client.c
 # Clean up
 clean:
 	rm -f $(SERVER) $(CLIENT)
+	rm -rf server_root
 
 # Phony targets
 .PHONY: all clean

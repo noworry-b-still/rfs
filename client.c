@@ -8,25 +8,21 @@
 
 #define BUFFER_SIZE 8192
 
+void handle_write(int socket_desc, const char *local_file_path, const char *remote_file_path);
+void handle_get(int socket_desc, const char *remote_file_path, const char *local_file_path);
+
 int main(int argc, char *argv[])
 {
     int socket_desc;
     struct sockaddr_in server_addr;
-    char command[BUFFER_SIZE], buffer[BUFFER_SIZE];
-    int local_fd, bytes_read;
-    ssize_t total_bytes_sent = 0;
 
-    if (argc != 4 || strcmp(argv[1], "WRITE") != 0)
+    if (argc != 4)
     {
-        printf("Usage: %s WRITE <local-file-path> <remote-file-path>\n", argv[0]);
-        return 1;
-    }
-
-    // Open the local file
-    local_fd = open(argv[2], O_RDONLY);
-    if (local_fd < 0)
-    {
-        perror("Failed to open local file");
+        printf("Usage: %s <COMMAND> <local-path> <remote-path>\n", argv[0]);
+        printf("COMMAND can be:\n");
+        printf("  WRITE: Upload a local file to the server\n");
+        printf("  GET: Download a file from the server\n");
+        printf(" RM: Delete a file from the server\n");
         return 1;
     }
 
@@ -35,7 +31,6 @@ int main(int argc, char *argv[])
     if (socket_desc == -1)
     {
         perror("Could not create socket");
-        close(local_fd);
         return 1;
     }
 
@@ -48,20 +43,50 @@ int main(int argc, char *argv[])
     if (connect(socket_desc, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
     {
         perror("Connection failed");
-        close(local_fd);
         close(socket_desc);
         return 1;
     }
 
+    if (strcmp(argv[1], "WRITE") == 0)
+    {
+        handle_write(socket_desc, argv[2], argv[3]);
+    }
+    else if (strcmp(argv[1], "GET") == 0)
+    {
+        handle_get(socket_desc, argv[2], argv[3]);
+    }
+    else
+    {
+        printf("Invalid command. Use WRITE or GET.\n");
+    }
+
+    close(socket_desc);
+    exit(0); // Explicitly exit after command
+}
+
+void handle_write(int socket_desc, const char *local_file_path, const char *remote_file_path)
+{
+    char command[BUFFER_SIZE], buffer[BUFFER_SIZE];
+    int local_fd;
+    ssize_t total_bytes_sent = 0;
+    ssize_t bytes_read;
+
+    // Open the local file
+    local_fd = open(local_file_path, O_RDONLY);
+    if (local_fd < 0)
+    {
+        perror("Failed to open local file");
+        return;
+    }
+
     // Send the WRITE command
-    snprintf(command, sizeof(command), "WRITE %s %s", argv[2], argv[3]);
+    snprintf(command, sizeof(command), "WRITE %s %s", local_file_path, remote_file_path);
     printf("Sending command: %s\n", command);
     if (send(socket_desc, command, strlen(command), 0) < 0)
     {
         perror("Failed to send command");
         close(local_fd);
-        close(socket_desc);
-        return 1;
+        return;
     }
 
     // Wait for server to be ready
@@ -70,8 +95,7 @@ int main(int argc, char *argv[])
     {
         perror("Failed to receive server ready message");
         close(local_fd);
-        close(socket_desc);
-        return 1;
+        return;
     }
     buffer[bytes_read] = '\0';
     printf("Server response: %s", buffer);
@@ -80,8 +104,7 @@ int main(int argc, char *argv[])
     {
         printf("Server not ready: %s", buffer);
         close(local_fd);
-        close(socket_desc);
-        return 1;
+        return;
     }
 
     // Send the file data
@@ -91,8 +114,7 @@ int main(int argc, char *argv[])
         {
             perror("Failed to send file data");
             close(local_fd);
-            close(socket_desc);
-            return 1;
+            return;
         }
         total_bytes_sent += bytes_read;
         printf("Sent %zd bytes\n", total_bytes_sent);
@@ -104,8 +126,7 @@ int main(int argc, char *argv[])
     {
         perror("Failed to send end marker");
         close(local_fd);
-        close(socket_desc);
-        return 1;
+        return;
     }
 
     close(local_fd);
@@ -114,7 +135,7 @@ int main(int argc, char *argv[])
     bytes_read = recv(socket_desc, buffer, sizeof(buffer) - 1, 0);
     if (bytes_read > 0)
     {
-        buffer[bytes_read] = '\0'; // Null-terminate the response
+        buffer[bytes_read] = '\0';
         printf("Server response: %s", buffer);
     }
     else if (bytes_read == 0)
@@ -125,8 +146,80 @@ int main(int argc, char *argv[])
     {
         perror("Failed to receive acknowledgment");
     }
+}
 
-    // Close the socket
-    close(socket_desc);
-    return 0;
+void handle_get(int socket_desc, const char *remote_file_path, const char *local_file_path)
+{
+    char command[BUFFER_SIZE], buffer[BUFFER_SIZE];
+    int local_fd;
+    ssize_t bytes_read;
+    ssize_t total_bytes_received = 0;
+    int done_received = 0;
+
+    // Open the local file for writing
+    local_fd = open(local_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (local_fd < 0)
+    {
+        perror("Failed to open local file");
+        return;
+    }
+
+    // Send the GET command
+    snprintf(command, sizeof(command), "GET %s %s", remote_file_path, local_file_path);
+    printf("Sending command: %s\n", command);
+    if (send(socket_desc, command, strlen(command), 0) < 0)
+    {
+        perror("Failed to send command");
+        close(local_fd);
+        return;
+    }
+
+    // Wait for server to be ready
+    bytes_read = recv(socket_desc, buffer, sizeof(buffer) - 1, 0);
+    if (bytes_read <= 0)
+    {
+        perror("Failed to receive server ready message");
+        close(local_fd);
+        return;
+    }
+    buffer[bytes_read] = '\0';
+    printf("Server response: %s", buffer);
+
+    if (strncmp(buffer, "READY\n", 6) != 0)
+    {
+        printf("Server not ready: %s", buffer);
+        close(local_fd);
+        return;
+    }
+
+    // Receive file data from the server
+    while (!done_received)
+    {
+        bytes_read = recv(socket_desc, buffer, sizeof(buffer), 0);
+        if (bytes_read <= 0)
+        {
+            perror("Failed to receive file data");
+            break;
+        }
+
+        // Check if the received data is the DONE marker
+        if (bytes_read == 5 && strncmp(buffer, "DONE\n", 5) == 0)
+        {
+            printf("Received DONE marker. Received %zd bytes total.\n", total_bytes_received);
+            done_received = 1;
+            break;
+        }
+
+        // Write the data to the local file
+        if (write(local_fd, buffer, bytes_read) < 0)
+        {
+            perror("Failed to write to local file");
+            close(local_fd);
+            return;
+        }
+        total_bytes_received += bytes_read;
+    }
+
+    close(local_fd);
+    printf("File retrieved successfully\n");
 }
