@@ -8,7 +8,7 @@
 
 #define BUFFER_SIZE 8192
 
-void handle_write(int socket_desc, const char *local_file_path, const char *remote_file_path);
+void handle_write(int socket_desc, const char *local_file_path, const char *remote_file_path, const char *permission);
 void handle_get(int socket_desc, const char *remote_file_path, const char *local_file_path);
 void handle_rm(int socket_desc, const char *remote_file_path);
 
@@ -17,11 +17,12 @@ int main(int argc, char *argv[])
     int socket_desc;
     struct sockaddr_in server_addr;
 
-    if (argc < 3 || argc > 4)
+    if (argc < 3 || argc > 6)
     {
-        printf("Usage: %s <COMMAND> [local-path] <remote-path>\n", argv[0]);
+        printf("Usage: %s <COMMAND> [local-path] <remote-path> [-r|-rw]\n", argv[0]);
         printf("COMMAND can be:\n");
         printf("  WRITE: Upload a local file to the server (requires both local and remote paths)\n");
+        printf("        Optional flags: -r (read-only), -rw (read-write, default)\n");
         printf("  GET: Download a file from the server (requires both remote and local paths)\n");
         printf("  RM: Delete a file from the server (requires only remote path)\n");
         return 1;
@@ -50,13 +51,30 @@ int main(int argc, char *argv[])
 
     if (strcmp(argv[1], "WRITE") == 0)
     {
-        if (argc != 4)
+        char *permission = "-rw"; // Default to read-write
+
+        // Check for permission flag
+        if (argc == 5)
+        {
+            if (strcmp(argv[4], "-r") == 0 || strcmp(argv[4], "-rw") == 0)
+            {
+                permission = argv[4];
+            }
+            else
+            {
+                printf("Invalid permission flag. Use -r or -rw.\n");
+                close(socket_desc);
+                return 1;
+            }
+        }
+        else if (argc != 4)
         {
             printf("WRITE requires a local path and a remote path.\n");
             close(socket_desc);
             return 1;
         }
-        handle_write(socket_desc, argv[2], argv[3]);
+
+        handle_write(socket_desc, argv[2], argv[3], permission);
     }
     else if (strcmp(argv[1], "GET") == 0)
     {
@@ -87,7 +105,7 @@ int main(int argc, char *argv[])
     exit(0); // Explicitly exit after command
 }
 
-void handle_write(int socket_desc, const char *local_file_path, const char *remote_file_path)
+void handle_write(int socket_desc, const char *local_file_path, const char *remote_file_path, const char *permission)
 {
     char command[BUFFER_SIZE], buffer[BUFFER_SIZE];
     int local_fd;
@@ -102,8 +120,8 @@ void handle_write(int socket_desc, const char *local_file_path, const char *remo
         return;
     }
 
-    // Send the WRITE command
-    snprintf(command, sizeof(command), "WRITE %s %s", local_file_path, remote_file_path);
+    // Send the WRITE command with permission
+    snprintf(command, sizeof(command), "WRITE %s %s %s", local_file_path, remote_file_path, permission);
     printf("Sending command: %s\n", command);
     if (send(socket_desc, command, strlen(command), 0) < 0)
     {
@@ -210,7 +228,7 @@ void handle_get(int socket_desc, const char *remote_file_path, const char *local
 
     if (strncmp(buffer, "READY\n", 6) != 0)
     {
-        printf("Server not ready: %s", buffer);
+        printf("Server response indicates an error: %s", buffer);
         close(local_fd);
         return;
     }

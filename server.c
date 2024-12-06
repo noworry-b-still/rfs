@@ -9,6 +9,39 @@
 
 #define BUFFER_SIZE 8192
 #define SERVER_ROOT "./server_root"
+#define MAX_FILES 1024
+
+// Struct to track file permissions
+typedef struct
+{
+    char path[256];
+    int is_read_only;
+} FilePermission;
+
+// Global array to track file permissions
+FilePermission file_permissions[MAX_FILES];
+int permission_count = 0;
+
+int is_file_read_only(const char *path)
+{
+    // First check if the file exists
+    struct stat st;
+    if (stat(path, &st) != 0)
+    {
+        // File doesn't exist, so it can't be read-only
+        return 0;
+    }
+
+    // Then check permissions
+    for (int i = 0; i < permission_count; i++)
+    {
+        if (strcmp(file_permissions[i].path, path) == 0)
+        {
+            return file_permissions[i].is_read_only;
+        }
+    }
+    return 0; // Default to not read-only if no permission record exists
+}
 
 void handle_client(int client_sock);
 
@@ -82,7 +115,7 @@ int main(void)
 void handle_client(int client_sock)
 {
     char command[BUFFER_SIZE], buffer[BUFFER_SIZE];
-    char local_file[256], remote_file[256];
+    char local_file[256], remote_file[256], permission[8] = {0};
     ssize_t bytes_read, file_fd;
     char full_path[BUFFER_SIZE];
     ssize_t total_bytes_transferred = 0;
@@ -98,9 +131,9 @@ void handle_client(int client_sock)
 
     if (strncmp(command, "WRITE", 5) == 0)
     {
-        if (sscanf(command, "WRITE %255s %255s", local_file, remote_file) != 2)
+        if (sscanf(command, "WRITE %255s %255s %7s", local_file, remote_file, permission) < 2)
         {
-            const char *error_msg = "Invalid command format. Use: WRITE <local-file> <remote-file>\n";
+            const char *error_msg = "Invalid command format. Use: WRITE <local-file> <remote-file> [-r|-rw]\n";
             send(client_sock, error_msg, strlen(error_msg), 0);
             return;
         }
@@ -108,12 +141,43 @@ void handle_client(int client_sock)
         snprintf(full_path, sizeof(full_path), "%s/%s", SERVER_ROOT, remote_file);
         printf("Full path: %s\n", full_path);
 
+        // Create directory structure if it doesn't exist
         char *dir_end = strrchr(full_path, '/');
         if (dir_end)
         {
             *dir_end = '\0';
             mkdir(full_path, 0755);
             *dir_end = '/';
+        }
+
+        // Check if a permission record already exists for this file
+        // We only set permissions once
+        int existing_permission_index = -1;
+        for (int i = 0; i < permission_count; i++)
+        {
+            if (strcmp(file_permissions[i].path, full_path) == 0)
+            {
+                existing_permission_index = i;
+                break;
+            }
+        }
+
+        // Add permission record if it doesn't exist
+        if (existing_permission_index == -1 && permission_count < MAX_FILES)
+        {
+            // Set initial permissions
+            strcpy(file_permissions[permission_count].path, full_path);
+            file_permissions[permission_count].is_read_only =
+                (strcmp(permission, "-r") == 0);
+            permission_count++;
+        }
+
+        // If file already exists and is read-only, deny write
+        if (is_file_read_only(full_path))
+        {
+            const char *error_msg = "ERROR: File is read-only and cannot be modified\n";
+            send(client_sock, error_msg, strlen(error_msg), 0);
+            return;
         }
 
         file_fd = open(full_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -222,6 +286,14 @@ void handle_client(int client_sock)
 
         snprintf(full_path, sizeof(full_path), "%s/%s", SERVER_ROOT, remote_file);
         printf("Full path to delete: %s\n", full_path);
+
+        // Check if file is read-only before attempting to delete
+        if (is_file_read_only(full_path))
+        {
+            const char *error_msg = "ERROR: File is read-only and cannot be deleted\n";
+            send(client_sock, error_msg, strlen(error_msg), 0);
+            return;
+        }
 
         // Attempt to remove the file or directory
         if (remove(full_path) == 0)
