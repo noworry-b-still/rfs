@@ -23,11 +23,19 @@
 
 ## Client/Server:
 
-1. Client disconnects after making/handling a command request.
+1. Client disconnects after making/handling a command request.(atleast this is the intention)
 2. Server stays alive until an interrupt (Ctrl-C) is pressed, basically it listens for clients requests until killed.
 
+## Bugs/Features/Changes (to be worked):
 
+1. Client sometimes doesn't disconnect.
+2. Implement Multi-client support.
+3. Refactor the code, especially `server.c` and `client.c`.
 
+## Bugs(fixed so far):
+
+1. Improved client not disconnecting (not 100%).
+2. Fix creating directories during GET which was not working earlier.
 
 
 
