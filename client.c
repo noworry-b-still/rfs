@@ -5,12 +5,14 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 #define BUFFER_SIZE 8192
 
 void handle_write(int socket_desc, const char *local_file_path, const char *remote_file_path, const char *permission);
 void handle_get(int socket_desc, const char *remote_file_path, const char *local_file_path);
 void handle_rm(int socket_desc, const char *remote_file_path);
+void create_local_dir(const char *local_file_path);
 
 int main(int argc, char *argv[])
 {
@@ -189,6 +191,40 @@ void handle_write(int socket_desc, const char *local_file_path, const char *remo
     }
 }
 
+void create_local_dir(const char *local_file_path)
+{
+    char dir[BUFFER_SIZE];
+    char *dir_end;
+
+    // Copy the local file path to dir to modify only the directory part
+    strncpy(dir, local_file_path, sizeof(dir) - 1);
+    dir[sizeof(dir) - 1] = '\0';
+
+    // Find the last '/' in the path (before the file name)
+    dir_end = strrchr(dir, '/');
+    if (dir_end)
+    {
+        *dir_end = '\0'; // null-terminate at the last '/' to separate directory from file
+
+        // Check if the directory exists
+        struct stat st = {0};
+        if (stat(dir, &st) == -1)
+        {
+            // Directory doesn't exist, create it
+            if (mkdir(dir, 0700) != 0)
+            {
+                perror("Failed to create directory");
+                exit(1); // Exit on failure to create directory
+            }
+            printf("[INFO] Directory created: %s\n", dir);
+        }
+        else
+        {
+            printf("[INFO] Directory already exists: %s\n", dir);
+        }
+    }
+}
+
 void handle_get(int socket_desc, const char *remote_file_path, const char *local_file_path)
 {
     char command[BUFFER_SIZE], buffer[BUFFER_SIZE];
@@ -197,64 +233,68 @@ void handle_get(int socket_desc, const char *remote_file_path, const char *local
     ssize_t total_bytes_received = 0;
     int done_received = 0;
 
+    printf("[INFO] Preparing to download remote file '%s' to local path '%s'.\n", remote_file_path, local_file_path);
+
+    // Create the necessary local directory if it doesn't exist
+    create_local_dir(local_file_path);
+
     // Open the local file for writing
     local_fd = open(local_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (local_fd < 0)
     {
-        perror("Failed to open local file");
+        perror("[ERROR] Failed to open local file");
         return;
     }
 
-    // Send the GET command
+    // Send the GET command with both remote and local file paths
     snprintf(command, sizeof(command), "GET %s %s", remote_file_path, local_file_path);
-    printf("Sending command: %s\n", command);
+    printf("[INFO] Sending command: %s\n", command);
     if (send(socket_desc, command, strlen(command), 0) < 0)
     {
-        perror("Failed to send command");
+        perror("[ERROR] Failed to send GET command");
         close(local_fd);
         return;
     }
 
-    // Wait for server to be ready
+    // Receive the server response
     bytes_read = recv(socket_desc, buffer, sizeof(buffer) - 1, 0);
     if (bytes_read <= 0)
     {
-        perror("Failed to receive server ready message");
+        perror("[ERROR] Failed to receive server response");
         close(local_fd);
         return;
     }
     buffer[bytes_read] = '\0';
-    printf("Server response: %s", buffer);
+    printf("[INFO] Server response: %s", buffer);
 
     if (strncmp(buffer, "READY\n", 6) != 0)
     {
-        printf("Server response indicates an error: %s", buffer);
+        printf("[ERROR] Server response indicates an error: %s", buffer);
         close(local_fd);
         return;
     }
 
-    // Receive file data from the server
+    // Now receive the file data from the server
     while (!done_received)
     {
         bytes_read = recv(socket_desc, buffer, sizeof(buffer), 0);
         if (bytes_read <= 0)
         {
-            perror("Failed to receive file data");
+            perror("[ERROR] Failed to receive file data");
             break;
         }
 
-        // Check if the received data is the DONE marker
+        // Check for 'DONE' marker
         if (bytes_read == 5 && strncmp(buffer, "DONE\n", 5) == 0)
         {
-            printf("Received DONE marker. Received %zd bytes total.\n", total_bytes_received);
+            printf("[INFO] Received DONE marker. Total bytes received: %zd.\n", total_bytes_received);
             done_received = 1;
             break;
         }
 
-        // Write the data to the local file
         if (write(local_fd, buffer, bytes_read) < 0)
         {
-            perror("Failed to write to local file");
+            perror("[ERROR] Failed to write to local file");
             close(local_fd);
             return;
         }
@@ -262,7 +302,7 @@ void handle_get(int socket_desc, const char *remote_file_path, const char *local
     }
 
     close(local_fd);
-    printf("File retrieved successfully\n");
+    printf("[INFO] File downloaded successfully.\n");
 }
 
 void handle_rm(int socket_desc, const char *remote_file_path)
