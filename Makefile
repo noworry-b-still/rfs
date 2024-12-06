@@ -10,7 +10,7 @@ all: $(SERVER) $(CLIENT)
 
 # Compile server
 $(SERVER): server.c
-	$(CC) -o $(SERVER) server.c
+	$(CC) -o $(SERVER) server.c -pthread
 
 # Compile client
 $(CLIENT): client.c
