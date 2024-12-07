@@ -11,10 +11,10 @@
 ## General Flow:
 
 1. Run `make` to compile and build.
-2. Run `./server` in one terminal
-3. Run `./client WRITE local-file-path remote-file-path` (to upload a file to remote server)
-4. Run `./client GET remote-file-path local-file-path` (to download a file from remote server)
-5. Run `./client RM remote-file-path` (to remove a file from remote server)
+2. Run `./server` in one terminal.
+3. Run `./client WRITE local-file-path remote-file-path -r` (to upload a read-only file to remote server)(with no flag, defaults to read-write file).
+4. Run `./client GET remote-file-path local-file-path` (to download a file from remote server).
+5. Run `./client RM remote-file-path` (to remove a file from remote server).
 
 ## Permissions:
 
@@ -23,19 +23,10 @@
 
 ## Client/Server:
 
-1. Client disconnects after making/handling a command request.(atleast this is the intention)
+1. Client disconnects after making/handling a command request.(atleast this is the intention) (if not, press Ctrl-C)
 2. Server stays alive until an interrupt (Ctrl-C) is pressed, basically it listens for clients requests until killed.
 
-## Bugs/Features/Changes (to be worked):
 
-1. Client sometimes doesn't disconnect.
-2. Implement Multi-client support.
-3. Refactor the code, especially `server.c` and `client.c`.
-
-## Bugs(fixed so far):
-
-1. Improved client not disconnecting (not 100%).
-2. Fix creating directories during GET which was not working earlier.
 
 
 
